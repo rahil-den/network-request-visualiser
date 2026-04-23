@@ -10,40 +10,73 @@
 
 import type { RequestEntry } from './types';
 
-// TODO 1: Define the shape of all events this bus can handle.
-//         Create a type called `BusEvents`.
-//         It should be an object type with ONE key:
-//           'request' → a function that receives a RequestEntry and returns void
+// TODO 1 ✅ — Typed event map
 //
-//         💡 This is a "typed event map" — it tells TypeScript what payload
-//            each event name carries. No more guessing what data comes with an event.
-
-
-
-// TODO 2: Create a class called `EventBus`.
-//         It needs one private field:
-//           `listeners` — a Map where:
-//             - Key is a string (the event name, e.g. 'request')
-//             - Value is an array of functions (the handlers)
+// An object type that maps event names → the function signature for that event.
+// This lets TypeScript know: "if you listen to 'request', you get a RequestEntry."
 //
-//         💡 Map<string, Function[]> works but is loose. For a challenge,
-//            try making it generic: Map<keyof BusEvents, BusEvents[keyof BusEvents][]>
+//   type EventMap = {
+//     eventName: (payload: PayloadType) => void;
+//   }
+//
+type BusEvents = {
+  request: (entry: RequestEntry) => void;
+};
 
-// TODO 3: Add an `on` method to EventBus.
-//         Signature: on(event: string, handler: Function): void
-//         It should add the handler to the listeners map for that event.
-//         If no array exists for that event yet, create one first.
+// TODO 2 ✅ — EventBus class
+//
+// A Map is used to store listeners because:
+//   - O(1) lookup by event name (faster than iterating an array of event strings)
+//   - It's a built-in data structure: Map<Key, Value>
+//
+// The key is a string (event name), the value is an array of handler functions.
+//
+class EventBus {
+  // Map<eventName, list of handlers for that event>
+  private listeners: Map<string, Function[]> = new Map();
 
-// TODO 4: Add an `off` method to EventBus.
-//         Signature: off(event: string, handler: Function): void
-//         It should remove the handler from the listeners array for that event.
-//         💡 Use Array.filter() to remove it.
+  // TODO 3 ✅ — on(): Subscribe to an event
+  //
+  // Pattern: if no array exists for this event yet, create one first.
+  // Then push the handler into it.
+  //
+  on(event: string, handler: Function): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(handler);
+  }
 
-// TODO 5: Add an `emit` method to EventBus.
-//         Signature: emit(event: string, payload: RequestEntry): void
-//         It should call each registered handler with the payload.
-//         If there are no listeners for that event, do nothing.
+  // TODO 4 ✅ — off(): Unsubscribe from an event
+  //
+  // Array.filter() returns a NEW array excluding the handler we want to remove.
+  // This is the standard way to immutably remove an item from an array.
+  //
+  off(event: string, handler: Function): void {
+    const handlers = this.listeners.get(event);
+    if (!handlers) return;
+    this.listeners.set(event, handlers.filter((h) => h !== handler));
+  }
 
-// TODO 6: Export a singleton instance of EventBus called `bus`.
-//         💡 A singleton means one shared instance used by the whole app.
-//            This way the interceptor and React all talk to the SAME bus.
+  // TODO 5 ✅ — emit(): Fire an event, calling all subscribed handlers
+  //
+  // If nobody is listening yet, we do nothing (no error).
+  // forEach() calls each handler with the payload.
+  //
+  emit(event: string, payload: RequestEntry): void {
+    const handlers = this.listeners.get(event);
+    if (!handlers) return;
+    handlers.forEach((handler) => handler(payload));
+  }
+}
+
+// TODO 6 ✅ — Singleton export
+//
+// By exporting ONE instance (not the class), every file that imports `bus`
+// gets the exact same object. This means the interceptor and React share
+// the same listener list — they can actually communicate.
+//
+// If we exported the class and each file did `new EventBus()`, they'd each
+// have their own isolated instance and nothing would work.
+//
+export const bus = new EventBus();
