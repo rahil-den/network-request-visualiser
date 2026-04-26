@@ -15,14 +15,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { RequestEntry } from './types';
-
-// TODO 1: Define a type (or interface) called `LRUNode`.
-//         This represents one node in the doubly-linked list.
-//         Fields:
-//           key   → string
-//           value → RequestEntry
-//           prev  → LRUNode | null   (pointer to previous node)
-//           next  → LRUNode | null   (pointer to next node)
 interface LRUNode {
     key: string;
     value: RequestEntry;
@@ -30,16 +22,7 @@ interface LRUNode {
     next: LRUNode | null;
 
 }
-// TODO 2: Create a class called `LRUCache`.
-//         It should have these private fields:
-//           capacity → number           (max number of entries to store)
-//           cache    → Map<string, LRUNode>  (HashMap for O(1) lookup by key)
-//           head     → LRUNode          (dummy head node — always present, never holds real data)
-//           tail     → LRUNode          (dummy tail node — always present, never holds real data)
-//
-//         💡 Dummy head & tail nodes simplify the code — you never have to
-//            check "is this the first/last real node?".
-//            The list always looks like: head ↔ [real nodes] ↔ tail
+
 class LRUCache{
     private capacity: number;
     private cache: Map<string, LRUNode>;
