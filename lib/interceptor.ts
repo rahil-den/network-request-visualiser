@@ -88,3 +88,36 @@ import type { RequestEntry, CacheStatus } from './types';
 //
 //         💡 Next.js runs your code on the server during SSR.
 //            `window` doesn't exist on the server, so we must guard against it.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS FILE EXISTS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The browser doesn't natively tell you when a fetch or XHR request happens
+// (that's what DevTools is for — but DevTools is outside your app).
+// To build our own panel INSIDE the page, we need to intercept those calls ourselves.
+//
+// MONKEY-PATCHING explained:
+//   JavaScript globals like `window.fetch` are just regular properties.
+//   You can replace them at runtime with your own function — as long as you
+//   call the original at the end, the app never knows the difference.
+//
+//   It's the same technique used by:
+//     - Jest:    replaces fetch/timers with mocks during tests
+//     - Sentry:  patches window.onerror to capture uncaught exceptions
+//     - DataDog: patches XHR/fetch to measure real-user performance (RUM)
+//     - Browser extensions: inject content scripts that patch globals
+//
+// WHY TWO INTERCEPTORS (fetch AND XHR)?
+//   Modern code uses fetch().  Older libraries (jQuery, Axios <1.x, legacy SDKs)
+//   use XMLHttpRequest. To capture ALL requests regardless of how they're made,
+//   we need to patch both.
+//
+// WHY NOT USE A SERVICE WORKER?
+//   Service Workers can intercept requests too, but they:
+//     - Require HTTPS (or localhost)
+//     - Have a complex registration/activation lifecycle
+//     - Can't easily communicate synchronously back to the page
+//   Monkey-patching is simpler, runs instantly, and works in any environment.
+//   (Service Workers are great for caching — which is a separate concern.)
+// ─────────────────────────────────────────────────────────────────────────────

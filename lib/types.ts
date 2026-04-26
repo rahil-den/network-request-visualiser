@@ -36,3 +36,27 @@ export interface RequestEntry {
   responseHeaders: Record<string, string>; // headers received in the response
   size: number;                          // response body size in bytes
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS FILE EXISTS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// In a project where many files need to share the same data shapes, you have
+// two choices:
+//   1. Re-define the types in every file that needs them   ← leads to drift & bugs
+//   2. Define them ONCE here and import them everywhere    ← what we do
+//
+// This file is the single source of truth for:
+//
+//   CacheStatus  — tells every part of the app what the valid cache outcomes are.
+//                  Without this, one file might use "hit", another "HIT", another
+//                  "cache_hit" — TypeScript can't catch those mismatches.
+//
+//   RequestEntry — the exact shape of a captured network request.
+//                  The interceptor CREATES these objects, the LRU cache STORES them,
+//                  and the React UI READS them. All three files need to agree on the
+//                  shape — this file is that agreement.
+//
+// This pattern is called a "shared type contract" and is standard in any
+// TypeScript codebase larger than one file.
+// ─────────────────────────────────────────────────────────────────────────────

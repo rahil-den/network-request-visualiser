@@ -80,3 +80,33 @@ class EventBus {
 // have their own isolated instance and nothing would work.
 //
 export const bus = new EventBus();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS FILE EXISTS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The interceptor (lib/interceptor.ts) knows about network requests.
+// The UI (VisualizerProvider.tsx) knows about React state.
+// The problem: how do you connect them WITHOUT making them directly depend on each other?
+//
+// If the interceptor imported React, it would:
+//   - Only work inside React components
+//   - Break server-side rendering (SSR)
+//   - Be impossible to test in isolation
+//
+// The Event Bus solves this with the OBSERVER PATTERN:
+//   - The interceptor just calls  bus.emit('request', entry)     ← "something happened"
+//   - The UI just calls           bus.on('request', handler)     ← "tell me when it does"
+//   - Neither file imports the other. They only share the bus.
+//
+// This is called LOOSE COUPLING — two systems communicate through a shared
+// channel (the bus) rather than directly. It's used everywhere:
+//   - Node.js's EventEmitter
+//   - Redux's action dispatch
+//   - The DOM's addEventListener
+//   - Even hardware interrupts in operating systems
+//
+// The singleton export is critical: every file that does `import { bus }`
+// gets the EXACT SAME instance, so the interceptor's emits and the UI's
+// listeners are registered on the same object.
+// ─────────────────────────────────────────────────────────────────────────────

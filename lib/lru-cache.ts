@@ -23,7 +23,13 @@ import type { RequestEntry } from './types';
 //           value → RequestEntry
 //           prev  → LRUNode | null   (pointer to previous node)
 //           next  → LRUNode | null   (pointer to next node)
+interface LRUNode {
+    key: string;
+    value: RequestEntry;
+    prev: LRUNode | null;
+    next: LRUNode | null;
 
+}
 // TODO 2: Create a class called `LRUCache`.
 //         It should have these private fields:
 //           capacity → number           (max number of entries to store)
@@ -34,40 +40,106 @@ import type { RequestEntry } from './types';
 //         💡 Dummy head & tail nodes simplify the code — you never have to
 //            check "is this the first/last real node?".
 //            The list always looks like: head ↔ [real nodes] ↔ tail
+class LRUCache{
+    private capacity: number;
+    private cache: Map<string, LRUNode>;
+    private head: LRUNode;
+    private tail: LRUNode;
 
-// TODO 3: Add a constructor(capacity: number).
-//         - Store the capacity
-//         - Initialise the Map
-//         - Create dummy head and tail nodes (key='', value can be a type assertion)
-//         - Link them: head.next = tail, tail.prev = head
+    constructor(capacity: number) {
+        this.capacity = capacity;
+        this.cache = new Map<string, LRUNode>();
+        this.head = { key: '', value: {} as RequestEntry, prev: null, next: null };
+        this.tail = { key: '', value: {} as RequestEntry, prev: null, next: null };
+        this.head.next = this.tail;
+        this.tail.prev = this.head;
+    }
+    
+    private removeNode(node: LRUNode): void {
+        if(!node.prev || !node.next) return;
+        node.prev.next = node.next;
+        node.next.prev = node.prev;
+    }
 
-// TODO 4: Add a private helper `removeNode(node: LRUNode): void`
-//         Unlinks a node from the doubly-linked list.
-//         💡 You need to update 4 pointers: the prev and next of its neighbours.
+    private insertAtFront(node: LRUNode): void {
+        const oldFirst = this.head.next!;  // capture BEFORE we change head.next
+        node.prev = this.head;
+        node.next = oldFirst;
+        this.head.next = node;
+        oldFirst.prev = node;
+    }
 
-// TODO 5: Add a private helper `insertAtFront(node: LRUNode): void`
-//         Inserts a node right after the dummy head (= most recently used position).
-//         💡 Again 4 pointers to update.
+    get(key: string) : RequestEntry | null {
+        const node = this.cache.get(key);
+        if(!node) return null;
+        this.removeNode(node);
+        this.insertAtFront(node);
+        return node.value;
+    }
 
-// TODO 6: Add a `get(key: string): RequestEntry | null` method.
-//         - If the key doesn't exist in the Map, return null
-//         - If it does exist:
-//             a. Remove the node from its current list position
-//             b. Re-insert it at the front (marks it as most recently used)
-//             c. Return node.value
+    put(key: string, value: RequestEntry): void {
+        const existingNode = this.cache.get(key);
+        if(existingNode) {
+            existingNode.value = value;
+            this.removeNode(existingNode);
+            this.insertAtFront(existingNode);
+            return;
+        }
+        const newNode: LRUNode = { key, value, prev: null, next: null };
+        this.cache.set(key, newNode);
+        this.insertAtFront(newNode);
+        if(this.cache.size > this.capacity) {
+            const lruNode = this.tail.prev;
+            if(lruNode) {
+                this.removeNode(lruNode);
+                this.cache.delete(lruNode.key);
+            }
+        }
+    }
 
-// TODO 7: Add a `put(key: string, value: RequestEntry): void` method.
-//         - If the key already exists, update its value and move to front
-//         - If it's new:
-//             a. Create a new LRUNode
-//             b. Add it to the Map
-//             c. Insert it at the front
-//             d. If cache.size > capacity, evict the node just before tail
-//                (that's the least-recently-used one) and delete it from the Map
+    values(): RequestEntry[] {
+        const result: RequestEntry[] = [];
+        let current = this.head.next;
+        while(current && current !== this.tail) {
+            result.push(current.value);
+            current = current.next;
+        }
+        return result;
+    }
 
-// TODO 8: Add a `values(): RequestEntry[]` method.
-//         Returns all cached entries in order from most-recent to least-recent.
-//         💡 Walk the list from head.next to tail, collecting node.value
+    
+}
 
-// TODO 9: Export a singleton: `export const requestCache = new LRUCache(100);`
-//         100 = store the last 100 requests.
+export const requestCache = new LRUCache(100);
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS FILE EXISTS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Every time a network request is captured, we need somewhere to STORE it so
+// the UI can display it. A plain array would work, but it has problems:
+//   - It grows forever (memory leak if the user stays on the page for hours)
+//   - No O(1) lookup by request ID when you want to update an entry
+//
+// An LRU Cache solves both:
+//   - It automatically evicts the oldest entries once it's full (capacity = 100)
+//   - O(1) lookup by key (the HashMap part)
+//   - O(1) eviction of the least-recently-used entry (the Doubly-Linked List part)
+//
+// WHY NOT JUST USE AN ARRAY + SLICE?
+//   Array.slice() to cap size = O(n) every insertion.
+//   LRU eviction = O(1). For a tool that may capture hundreds of requests,
+//   this matters.
+//
+// THE REAL-WORLD CONNECTION:
+//   The browser's own HTTP cache IS an LRU cache with a TTL overlay.
+//   When Chrome's disk cache is full, it evicts the least-recently-used
+//   resources — the exact same algorithm you're implementing here.
+//   This file makes that concept tangible and concrete.
+//
+// LEETCODE CONNECTION:
+//   This is LeetCode #146 — one of the most commonly asked DSA problems in
+//   technical interviews. Building it in a real project (vs. on a whiteboard)
+//   cements the pattern far better than solving it in isolation.
+// ─────────────────────────────────────────────────────────────────────────────
