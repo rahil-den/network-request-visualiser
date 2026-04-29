@@ -1,123 +1,187 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// lib/interceptor.ts
-// Monkey-patches window.fetch and XMLHttpRequest to capture every network request.
-//
-// 🧠 CONCEPT: Monkey-patching
-//   JavaScript lets you replace any global function at runtime.
-//   We save the original, replace it with our wrapper, do our work,
-//   then call the original so the app still works normally.
-//
-//   This is exactly how Jest mocks, Sentry error tracking, and
-//   browser extensions intercept network calls.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { bus } from './event-bus';
 import type { RequestEntry, CacheStatus } from './types';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// TODO 1: Write a helper function called `headersToRecord`.
-//         Signature: (headers: Headers) => Record<string, string>
-//         It converts a browser `Headers` object into a plain object.
-//         💡 Use headers.forEach((value, key) => { ... }) to iterate.
-//            Headers is a special browser class, not a plain object.
+function headersToRecord(headers: Headers): Record<string, string> {
+  const result: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
 
-// TODO 2: Write a helper function called `detectCacheStatus`.
-//         Signature: (status: number, headers: Headers) => CacheStatus
-//         Logic:
-//           - If status === 304 → return "REVALIDATED"
-//             (304 means the server said "nothing changed, use your cached copy")
-//           - If the response header 'x-cache' === 'HIT' → return "HIT"
-//             (our Service Worker will add this header)
-//           - Otherwise → return "MISS"
-//         💡 headers.get('x-cache') returns the header value or null.
+// Parses the raw string returned by XHR.getAllResponseHeaders() into a plain object.
+// The raw string looks like:  "content-type: application/json\r\ncontent-length: 42\r\n"
+function xhrHeadersToRecord(raw: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  raw
+    .trim()
+    .split('\r\n')
+    .forEach((line) => {
+      const idx = line.indexOf(':');
+      if (idx === -1) return;
+      const key = line.slice(0, idx).trim().toLowerCase();
+      const value = line.slice(idx + 1).trim();
+      result[key] = value;
+    });
+  return result;
+}
 
-// ─── Fetch Interceptor ───────────────────────────────────────────────────────
+function detectCacheStatus(status: number, headers: Headers): CacheStatus {
+  if (status === 304) return 'REVALIDATED';
+  if (headers.get('x-cache') === 'HIT') return 'HIT';
+  return 'MISS';
+}
 
-// TODO 3: Write an exported function called `interceptFetch`.
-//         It should:
-//           a. Save the original: const _fetch = window.fetch
-//           b. Replace window.fetch with an async function that:
-//              1. Records `startTime = performance.now()`
-//              2. Calls the original _fetch with the same arguments
-//              3. Records `duration = performance.now() - startTime`
-//              4. Reads the response headers (careful: response.headers is a Headers object)
-//              5. Reads Content-Length header for `size` (parse as number, default 0)
-//              6. Builds a RequestEntry object (generate id with crypto.randomUUID())
-//              7. Emits it: bus.emit('request', entry)
-//              8. Returns the response (so the app still works!)
-//           c. Handle errors: wrap in try/catch — if fetch throws, still emit
-//              an entry with status: 0, duration: performance.now() - startTime
-//
-//         💡 `window.fetch` can accept (url, options) or (Request, options).
-//            For simplicity, handle the URL as: String(input) where input is the first arg.
-//         💡 To get the method: options?.method ?? 'GET'
+// ─── Fetch Interceptor ────────────────────────────────────────────────────────
 
-// ─── XHR Interceptor ─────────────────────────────────────────────────────────
+export function interceptFetch() {
+  const _fetch = window.fetch;
 
-// TODO 4: Write an exported function called `interceptXHR`.
-//         XMLHttpRequest is more complex than fetch — it's event-driven.
-//         Steps:
-//           a. Save originals:
-//                const _open = XMLHttpRequest.prototype.open
-//                const _send = XMLHttpRequest.prototype.send
-//
-//           b. Replace XMLHttpRequest.prototype.open with a function that:
-//              - Stores `this._url` and `this._method` on the XHR instance
-//              - Calls the original _open with the same arguments
-//              (💡 use .apply(this, arguments) or spread the params)
-//
-//           c. Replace XMLHttpRequest.prototype.send with a function that:
-//              - Records startTime = performance.now()
-//              - Adds a 'loadend' event listener on `this` that fires when the request completes
-//              - Inside the listener: build a RequestEntry and emit it via bus
-//              - Then calls the original _send
-//
-//         💡 Inside the XHR prototype override, `this` refers to the XHR instance.
-//            You'll need to use `function` (not arrow function) so `this` is correct.
-//         💡 this.status → response status code
-//            this.getResponseHeader('content-length') → size
-//            You won't have a Headers object here — use getResponseHeader() instead.
+  window.fetch = async (...args) => {
+    const startTime = performance.now();
+    const [input, options] = args;
+    const url = String(input);
+    const method = (options?.method ?? 'GET').toUpperCase();
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+    try {
+      const response = await _fetch(...args);
+      const duration = performance.now() - startTime;
 
-// TODO 5: Export a function called `initInterceptors`.
-//         It should call interceptFetch() and interceptXHR().
-//         Add a guard so it only runs in the browser (not during SSR):
-//           if (typeof window === 'undefined') return;
-//
-//         💡 Next.js runs your code on the server during SSR.
-//            `window` doesn't exist on the server, so we must guard against it.
+      const responseHeaders = headersToRecord(response.headers);
+      const size = Number(responseHeaders['content-length']) || 0;
+      const cacheStatus = detectCacheStatus(response.status, response.headers);
+
+      const entry: RequestEntry = {
+        id: crypto.randomUUID(),
+        url,
+        method,
+        status: response.status,
+        startTime,
+        duration,
+        cacheStatus,
+        requestHeaders: options?.headers
+          ? headersToRecord(new Headers(options.headers as HeadersInit))
+          : {},
+        responseHeaders,
+        size,
+      };
+
+      bus.emit('request', entry);
+      return response;
+    } catch (e) {
+      const duration = performance.now() - startTime;
+
+      const entry: RequestEntry = {
+        id: crypto.randomUUID(),
+        url,
+        method,
+        status: 0,
+        startTime,
+        duration,
+        cacheStatus: 'MISS',
+        requestHeaders: {},
+        responseHeaders: {},
+        size: 0,
+      };
+
+      bus.emit('request', entry);
+      throw e;
+    }
+  };
+}
+
+// ─── XHR Interceptor ──────────────────────────────────────────────────────────
+
+export function interceptXHR() {
+  const _open = XMLHttpRequest.prototype.open;
+  const _send = XMLHttpRequest.prototype.send;
+
+  // We use `function` (not arrow) so that `this` refers to the XHR instance.
+  XMLHttpRequest.prototype.open = function (
+    this: XMLHttpRequest & { _url: string; _method: string },
+    method: string,
+    url: string | URL,
+    ...rest: [boolean?, string?, string?]
+  ) {
+    this._url = String(url);
+    this._method = method.toUpperCase();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (_open as any).call(this, method, url, ...rest);
+  } as typeof XMLHttpRequest.prototype.open;
+
+  XMLHttpRequest.prototype.send = function (
+    this: XMLHttpRequest & { _url: string; _method: string },
+    body?: Document | XMLHttpRequestBodyInit | null,
+  ) {
+    const startTime = performance.now();
+
+    const onLoadEnd = () => {
+      const duration = performance.now() - startTime;
+
+      // XHR gives back a raw header string — we parse it ourselves.
+      const rawHeaders = this.getAllResponseHeaders();
+      const responseHeaders = xhrHeadersToRecord(rawHeaders);
+      const size = Number(responseHeaders['content-length']) || 0;
+
+      // Wrap in a Headers object so detectCacheStatus can use .get()
+      const cacheStatus = detectCacheStatus(
+        this.status,
+        new Headers(responseHeaders),
+      );
+
+      const entry: RequestEntry = {
+        id: crypto.randomUUID(),
+        url: this._url ?? '',
+        method: this._method ?? 'GET',
+        status: this.status,
+        startTime,
+        duration,
+        cacheStatus,
+        requestHeaders: {},   // XHR doesn't expose sent headers to JS
+        responseHeaders,
+        size,
+      };
+
+      bus.emit('request', entry);
+      this.removeEventListener('loadend', onLoadEnd);
+    };
+
+    this.addEventListener('loadend', onLoadEnd);
+    _send.call(this, body);
+  };
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+export function initInterceptors() {
+  // Guard: window doesn't exist on the server (Next.js SSR).
+  // Without this check, the module would crash during the server-side render.
+  if (typeof window === 'undefined') return;
+
+  interceptFetch();
+  interceptXHR();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WHY THIS FILE EXISTS
+// WHAT THIS FILE DOES
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// The browser doesn't natively tell you when a fetch or XHR request happens
-// (that's what DevTools is for — but DevTools is outside your app).
-// To build our own panel INSIDE the page, we need to intercept those calls ourselves.
+// This file silently wraps the two ways a browser can make network requests —
+// fetch() and XMLHttpRequest — so every outgoing call is captured and sent to
+// the Event Bus, without breaking any of the original behaviour.
 //
-// MONKEY-PATCHING explained:
-//   JavaScript globals like `window.fetch` are just regular properties.
-//   You can replace them at runtime with your own function — as long as you
-//   call the original at the end, the app never knows the difference.
+// The technique is called monkey-patching:
+//   1. Save the original global (window.fetch / XHR.prototype.open+send)
+//   2. Replace it with our wrapper function
+//   3. Inside the wrapper: record timing, build a RequestEntry, emit it
+//   4. Call through to the original so the rest of the app is unaffected
 //
-//   It's the same technique used by:
-//     - Jest:    replaces fetch/timers with mocks during tests
-//     - Sentry:  patches window.onerror to capture uncaught exceptions
-//     - DataDog: patches XHR/fetch to measure real-user performance (RUM)
-//     - Browser extensions: inject content scripts that patch globals
-//
-// WHY TWO INTERCEPTORS (fetch AND XHR)?
-//   Modern code uses fetch().  Older libraries (jQuery, Axios <1.x, legacy SDKs)
-//   use XMLHttpRequest. To capture ALL requests regardless of how they're made,
-//   we need to patch both.
-//
-// WHY NOT USE A SERVICE WORKER?
-//   Service Workers can intercept requests too, but they:
-//     - Require HTTPS (or localhost)
-//     - Have a complex registration/activation lifecycle
-//     - Can't easily communicate synchronously back to the page
-//   Monkey-patching is simpler, runs instantly, and works in any environment.
-//   (Service Workers are great for caching — which is a separate concern.)
+// headersToRecord  — converts the browser's Headers object → plain JS object
+// xhrHeadersToRecord — parses XHR's raw "key: value\r\n" header string → plain object
+// detectCacheStatus — reads status code and x-cache header to decide HIT/MISS/REVALIDATED
+// interceptFetch   — patches window.fetch
+// interceptXHR     — patches XMLHttpRequest.prototype.open and .send
+// initInterceptors — entry point called once on mount; skips if running on the server (SSR)
 // ─────────────────────────────────────────────────────────────────────────────
