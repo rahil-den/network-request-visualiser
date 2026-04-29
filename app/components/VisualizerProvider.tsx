@@ -1,20 +1,4 @@
 'use client';
-// ─────────────────────────────────────────────────────────────────────────────
-// app/components/VisualizerProvider.tsx
-// React Context + useReducer that glues the interceptor to the UI.
-//
-// 🧠 CONCEPT: React Context + useReducer
-//   This is the React alternative to Redux for sharing state across components.
-//   - Context  = the "pipe" that carries state to any component that needs it
-//   - Reducer  = a pure function that decides how state changes given an action
-//   - Provider = the component that "wraps" your app and makes state available
-//
-// 🧠 CONCEPT: 'use client'
-//   Next.js renders components on the server by default (SSR).
-//   'use client' tells Next.js: "this component uses browser APIs (window, etc.)
-//   and should only run in the browser."
-//   The interceptor patches window.fetch — that's a browser-only thing.
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { bus } from '@/lib/event-bus';
@@ -22,82 +6,91 @@ import { requestCache } from '@/lib/lru-cache';
 import { initInterceptors } from '@/lib/interceptor';
 import type { RequestEntry } from '@/lib/types';
 
-// ─── State & Actions ─────────────────────────────────────────────────────────
+type State = {
+    entries: RequestEntry[];
+    isPaused: boolean;
+};
 
-// TODO 1: Define a type called `State`.
-//         Fields:
-//           entries  → RequestEntry[]    (list of captured requests)
-//           isPaused → boolean           (when true, new requests are ignored)
+type Action =
+    | { type: 'ADD'; payload: RequestEntry }
+    | { type: 'CLEAR' }
+    | { type: 'TOGGLE_PAUSE' };
 
-// TODO 2: Define a type called `Action` — a discriminated union with 3 variants:
-//           { type: 'ADD';   payload: RequestEntry }
-//           { type: 'CLEAR' }
-//           { type: 'TOGGLE_PAUSE' }
+function reducer(state: State, action: Action): State {
+    switch (action.type) {
+        case 'ADD':
+            if (state.isPaused) return state;
+            requestCache.put(action.payload.id, action.payload); // LRUCache uses .put(), not .set()
+            return { ...state, entries: [...requestCache.values()] };
+        case 'CLEAR':
+            // LRUCache has no .clear() — we just stop showing entries in React state.
+            // The cache will naturally evict old entries as new ones come in.
+            return { ...state, entries: [] };
+        case 'TOGGLE_PAUSE':
+            return { ...state, isPaused: !state.isPaused };
+        default:
+            return state;
+    }
+}
+
+type VisualizerContext = {
+    state:State;
+    dispatch:React.Dispatch<Action>;
+}
+
+const VisualizerContext = createContext<VisualizerContext | null>(null);
+
+export function VisualizerProvider({children}: { children: ReactNode }) {
+    const [state,dispatch] = useReducer(reducer,{entries:[],isPaused:false})
+    useEffect(()=>{
+        initInterceptors();
+        const handler=(entry:RequestEntry)=>{
+            dispatch({type:'ADD',payload:entry})
+        }
+        bus.on('request',handler)
+        return ()=>bus.off('request',handler)
+    },[])
+    return (
+        <VisualizerContext.Provider value={{ state, dispatch }}>
+            {children}
+        </VisualizerContext.Provider>
+    )
+}
+
+export function useVisualizer() {
+    const context = useContext(VisualizerContext);
+    if (!context) {
+        throw new Error('useVisualizer must be used within VisualizerProvider');
+    }
+    return context;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT THIS FILE DOES
+// ─────────────────────────────────────────────────────────────────────────────
 //
-//         💡 Discriminated unions let TypeScript narrow the type in a switch statement.
-//            Inside `case 'ADD':` TypeScript knows `action.payload` exists.
-
-// ─── Reducer ─────────────────────────────────────────────────────────────────
-
-// TODO 3: Write the reducer function.
-//         Signature: (state: State, action: Action): State
+// This file is the bridge between the network interceptor and the React UI.
+// It has three jobs:
 //
-//         Use a switch on action.type:
-//           'ADD':
-//             - If state.isPaused, return state unchanged
-//             - Otherwise, put the entry in requestCache (key = entry.id)
-//             - Return new state with entries = requestCache.values()
-//           'CLEAR':
-//             - Return state with entries = []
-//             (you can also clear the cache: requestCache is a singleton)
-//           'TOGGLE_PAUSE':
-//             - Return state with isPaused flipped (!state.isPaused)
+// 1. STATE MANAGEMENT (State + Action + reducer)
+//    Defines what the app remembers: a list of captured requests and whether
+//    capture is paused. The reducer decides how that state changes in response
+//    to three actions — ADD a new request, CLEAR the list, TOGGLE_PAUSE.
 //
-//         💡 Always return a NEW object — never mutate state directly.
-//            React detects changes by reference equality.
-
-// ─── Context ─────────────────────────────────────────────────────────────────
-
-// TODO 4: Define a type `VisualizerContextValue` with:
-//           state    → State
-//           dispatch → React.Dispatch<Action>
+// 2. WIRING (VisualizerProvider component)
+//    On mount it calls initInterceptors() to start patching window.fetch/XHR.
+//    It then subscribes to the event bus so every emitted RequestEntry is
+//    dispatched into React state. On unmount the listener is cleaned up.
+//    It wraps the app in a Context.Provider so any child component can read
+//    the captured requests without prop-drilling.
 //
-// TODO 5: Create the context:
-//           const VisualizerContext = createContext<VisualizerContextValue | null>(null);
-//           (Start as null — we'll throw if used outside the provider)
-
-// ─── Provider ────────────────────────────────────────────────────────────────
-
-// TODO 6: Create and export the `VisualizerProvider` component.
-//         Props: { children: ReactNode }
+// 3. ACCESS (useVisualizer hook)
+//    Any component that needs the request list or the dispatch function just
+//    calls useVisualizer(). If it's used outside the provider it throws a
+//    clear error instead of silently returning null.
 //
-//         Inside:
-//           a. Call useReducer(reducer, { entries: [], isPaused: false })
-//              to get [state, dispatch]
-//
-//           b. useEffect(() => {
-//                initInterceptors();              // start patching window.fetch
-//                const handler = (entry: RequestEntry) => {
-//                  dispatch({ type: 'ADD', payload: entry });
-//                };
-//                bus.on('request', handler);
-//                return () => bus.off('request', handler);  // cleanup on unmount
-//              }, []);
-//              💡 The empty [] means "run once when the component mounts".
-//                 The return function is the "cleanup" — it runs on unmount.
-//
-//           c. Return:
-//              <VisualizerContext.Provider value={{ state, dispatch }}>
-//                {children}
-//              </VisualizerContext.Provider>
-
-// ─── Hook ────────────────────────────────────────────────────────────────────
-
-// TODO 7: Export a custom hook called `useVisualizer`.
-//         It should:
-//           - Call useContext(VisualizerContext)
-//           - If the result is null, throw new Error('useVisualizer must be used within VisualizerProvider')
-//           - Otherwise return the context value
-//
-//         💡 This pattern ensures you get a helpful error message instead of a
-//            confusing "cannot read property of null" if you forget the provider.
+// DATA FLOW:
+//   window.fetch (patched) → interceptor → bus.emit('request', entry)
+//     → handler in useEffect → dispatch({ type: 'ADD', payload: entry })
+//       → reducer → new state → React re-renders WaterfallPanel
+// ─────────────────────────────────────────────────────────────────────────────
