@@ -1,77 +1,151 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// app/page.tsx — REPLACE THIS FILE
-// The demo page: concept intro cards, demo buttons, activity log,
-// and the Network Inspector panel rendered inline below everything.
-// ─────────────────────────────────────────────────────────────────────────────
 'use client';
 
-// TODO 1: Import `useState` from 'react'
-// TODO 2: Import `WaterfallPanel` from '@/app/components/WaterfallPanel'
-//         (The panel is rendered HERE on the page, not in layout.tsx)
+import { useState } from 'react';
+import { WaterfallPanel } from '@/app/components/WaterfallPanel';
 
-// ─── Demo Button ──────────────────────────────────────────────────────────────
+const concepts = [
+  {
+    icon: '🐒',
+    title: 'Monkey-patching',
+    body: 'We override window.fetch before your code runs. The original is still called — we just record what happened.',
+  },
+  {
+    icon: '💾',
+    title: 'LRU Cache',
+    body: 'Request metadata is stored in an LRU cache (same as LC-146). HashMap for O(1) lookup + doubly-linked list for O(1) eviction.',
+  },
+  {
+    icon: '🔄',
+    title: 'ETag / 304',
+    body: "Click 'Cached' twice to see 304 Not Modified. The server says \"nothing changed\" — no body is sent, saving bandwidth.",
+  },
+  {
+    icon: '📡',
+    title: 'Event Bus',
+    body: 'The interceptor emits events; React listens. Neither side knows about the other — this is called loose coupling.',
+  },
+];
 
-// TODO 3: Create a component called `DemoButton`.
-//         Props: { label: string; description: string; onClick: () => void; color: string }
-//
-//         Renders a small card / button with:
-//           - `label` as the main text (e.g. "⚡ Fast Request")
-//           - `description` as a smaller subtitle below
-//           - Clicking anywhere fires onClick
-//
-//         Style: white bg, rounded-xl, border border-gray-200, px-4 py-3,
-//                hover:shadow-md hover:border-gray-300 cursor-pointer transition-all
-//         Use `color` as the accent for the label text (e.g. "text-emerald-600").
+function DemoButton({
+  label,
+  description,
+  onClick,
+  color,
+}: {
+  label: string;
+  description: string;
+  onClick: () => void;
+  color: string;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 px-4 py-3 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all"
+    >
+      <p className={`font-semibold text-sm ${color}`}>{label}</p>
+      <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+    </div>
+  );
+}
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function Home() {
+  const [log, setLog] = useState<string[]>([]);
 
-// TODO 4: Export the default `Home` component.
-//
-//         a. useState for `log` (string[]) — activity log entries
-//
-//         b. Define 4 async handlers (each wrapped in try/catch):
-//              handleFast    → fetch('/api/demo/fast')
-//              handleSlow    → fetch('/api/demo/slow')
-//              handleCached  → fetch('/api/demo/cached') TWICE in a row
-//                              (2nd call triggers 304 → REVALIDATED)
-//              handleError   → fetch('/api/demo/error')
-//
-//            Each handler appends a string to the log like:
-//              "Fast → 200 OK (42ms)"
-//            Keep only the last 5 log entries (use .slice(-5)).
-//
-//         c. Page layout wrapper:
-//              className="min-h-screen bg-gray-100 p-8 max-w-5xl mx-auto space-y-8"
-//
-//         d. HEADER section:
-//              <h1> "Network Request Visualiser"
-//                   font-bold text-2xl text-gray-900
-//              <p>  Subtitle: "A live DevTools-style inspector. Intercepts every fetch & XHR call."
-//                   text-gray-500 text-sm mt-1
-//
-//         e. CONCEPT CARDS — a 2×2 grid (grid grid-cols-2 gap-4):
-//              Each card: white bg, rounded-xl, border border-gray-200, p-4
-//              4 cards:
-//                1. "🐒 Monkey-patching"  → "We override window.fetch before your code runs..."
-//                2. "💾 LRU Cache"        → "Request metadata stored in an LRU cache (LC-146)."
-//                3. "🔄 ETag / 304"       → "Click 'Cached' twice to see 304 Not Modified."
-//                4. "📡 Event Bus"        → "The interceptor emits events; React listens."
-//              Card title: font-semibold text-gray-800 text-sm mb-1
-//              Card body:  text-xs text-gray-500
-//
-//         f. DEMO BUTTONS row (flex gap-3 flex-wrap):
-//              <DemoButton label="⚡ Fast"        color="text-emerald-600" description="~5ms response"      onClick={handleFast}    />
-//              <DemoButton label="🐌 Slow"        color="text-blue-600"    description="~1.5s delay"        onClick={handleSlow}    />
-//              <DemoButton label="💾 Cached+ETag" color="text-violet-600"  description="Fires twice → 304"  onClick={handleCached}  />
-//              <DemoButton label="💥 Error 500"   color="text-red-500"     description="Server error"       onClick={handleError}   />
-//
-//         g. ACTIVITY LOG (shown only if log.length > 0):
-//              A small box: bg-white border border-gray-200 rounded-xl p-4
-//              Heading: "Activity Log" — text-xs font-semibold text-gray-500 uppercase mb-2
-//              List of log lines (most recent last):
-//                font-mono text-xs text-gray-700, each on its own line
-//
-//         h. NETWORK INSPECTOR PANEL:
-//              <WaterfallPanel />
-//              This is the main "Network Inspector" card from the reference image.
-//              It lives here on the page (not fixed at the bottom).
+  function addLog(entry: string) {
+    setLog((prev) => [...prev, entry].slice(-5));
+  }
+
+  async function handleFast() {
+    try {
+      const t = performance.now();
+      const res = await fetch('/api/demo/fast');
+      addLog(`Fast → ${res.status} OK (${(performance.now() - t).toFixed(0)}ms)`);
+    } catch {
+      addLog('Fast → network error');
+    }
+  }
+
+  async function handleSlow() {
+    try {
+      const t = performance.now();
+      const res = await fetch('/api/demo/slow');
+      addLog(`Slow → ${res.status} OK (${(performance.now() - t).toFixed(0)}ms)`);
+    } catch {
+      addLog('Slow → network error');
+    }
+  }
+
+  async function handleCached() {
+    try {
+      const t1 = performance.now();
+      const r1 = await fetch('/api/demo/cached');
+      addLog(`Cached (1st) → ${r1.status} (${(performance.now() - t1).toFixed(0)}ms)`);
+
+      const t2 = performance.now();
+      const r2 = await fetch('/api/demo/cached');
+      addLog(`Cached (2nd) → ${r2.status} (${(performance.now() - t2).toFixed(0)}ms)`);
+    } catch {
+      addLog('Cached → network error');
+    }
+  }
+
+  async function handleError() {
+    try {
+      const t = performance.now();
+      const res = await fetch('/api/demo/error');
+      addLog(`Error → ${res.status} (${(performance.now() - t).toFixed(0)}ms)`);
+    } catch {
+      addLog('Error → network error');
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-gray-100 p-8 max-w-5xl mx-auto space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="font-bold text-2xl text-gray-900">Network Request Visualiser</h1>
+        <p className="text-gray-500 text-sm mt-1">
+          A live DevTools-style inspector. Intercepts every fetch &amp; XHR call.
+        </p>
+      </div>
+
+      {/* Concept cards */}
+      <div className="grid grid-cols-2 gap-4">
+        {concepts.map((c) => (
+          <div
+            key={c.title}
+            className="bg-white rounded-xl border border-gray-200 p-4"
+          >
+            <p className="font-semibold text-gray-800 text-sm mb-1">
+              {c.icon} {c.title}
+            </p>
+            <p className="text-xs text-gray-500">{c.body}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Demo buttons */}
+      <div className="flex gap-3 flex-wrap">
+        <DemoButton label="⚡ Fast"        color="text-emerald-600" description="~5ms response"     onClick={handleFast}    />
+        <DemoButton label="🐌 Slow"        color="text-blue-600"   description="~1.5s delay"        onClick={handleSlow}    />
+        <DemoButton label="💾 Cached+ETag" color="text-violet-600" description="Fires twice → 304"  onClick={handleCached}  />
+        <DemoButton label="💥 Error 500"   color="text-red-500"    description="Server error"        onClick={handleError}   />
+      </div>
+
+      {/* Activity log */}
+      {log.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Activity Log</p>
+          {log.map((entry, i) => (
+            <p key={i} className="font-mono text-xs text-gray-700">
+              {entry}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Network Inspector panel */}
+      <WaterfallPanel />
+    </main>
+  );
+}
